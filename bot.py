@@ -7,15 +7,14 @@ import datetime
 
 # ================= CONFIGURACIÓN =================
 CANALES_TRABAJADORES = [
-    "1431761299934679060",  # Luis Morilla
-    "1431761351025627248",  # Roberth Venet
-    "1431761413541728451"   # Andrew Simmons
+    1431761299934679060,  # Luis
+    1431761351025627248,  # Roberth
+    1431761413541728451   # Andrew
 ]
 
 CANAL_HORAS_ID = 1431761591514435725  # Canal de horas trabajadas
-ARCHIVO_HORAS = "horas_trabajadores.json"
 
-FACTOR_SIMULACION = 60  # 1 segundo real = 1 minuto simulado
+ARCHIVO_HORAS = "horas_trabajadores.json"
 
 # ================= CARGAR O CREAR DATOS =================
 if os.path.exists(ARCHIVO_HORAS):
@@ -28,12 +27,12 @@ if os.path.exists(ARCHIVO_HORAS):
 else:
     horas_trabajadores = {}
 
-# Inicializar datos de trabajadores
+# Validar que cada canal tenga la estructura correcta
 for canal_id in CANALES_TRABAJADORES:
-    if canal_id not in horas_trabajadores:
-        horas_trabajadores[canal_id] = {"ingreso": None, "total_segundos": 0}
+    clave = str(canal_id)
+    if clave not in horas_trabajadores or not isinstance(horas_trabajadores[clave], dict):
+        horas_trabajadores[clave] = {"ingreso": None, "total_segundos": 0}
 
-# Guardar datos
 def guardar_datos():
     try:
         with open(ARCHIVO_HORAS, "w") as f:
@@ -73,6 +72,11 @@ async def actualizar_mensaje_horas():
 
     ranking_text = ""
     for canal_id, datos in horas_trabajadores.items():
+        # Validar estructura de cada dato
+        if not isinstance(datos, dict):
+            horas_trabajadores[canal_id] = {"ingreso": None, "total_segundos": 0}
+            datos = horas_trabajadores[canal_id]
+
         total_tiempo = segundos_a_horas_minutos(datos.get("total_segundos", 0))
         ch = bot.get_channel(int(canal_id))
         nombre = ch.name if ch else f"Canal {canal_id}"
@@ -97,10 +101,10 @@ async def actualizar_mensaje_horas():
         mensaje_horas_id = msg.id
 
 # ================= LIMPIEZA DE CANALES DE FICHAJE =================
-@tasks.loop(minutes=5)  # Cada 5 minutos para pruebas
+@tasks.loop(minutes=5)
 async def limpiar_canales_fichajes():
     for canal_id in CANALES_TRABAJADORES:
-        canal = bot.get_channel(int(canal_id))
+        canal = bot.get_channel(canal_id)
         if canal:
             try:
                 async for msg in canal.history(limit=20):
@@ -116,7 +120,7 @@ async def on_ready():
     limpiar_canales_fichajes.start()
     for guild in bot.guilds:
         for canal_id in CANALES_TRABAJADORES:
-            canal = guild.get_channel(int(canal_id))
+            canal = guild.get_channel(canal_id)
             if canal:
                 view = FichajeView()
                 embed = discord.Embed(
@@ -129,7 +133,6 @@ async def on_ready():
                     print(f"📋 Panel enviado en #{canal.name}")
                 except Exception as e:
                     print(f"⚠️ No se pudo enviar panel en {canal.name}: {e}")
-    # Inicializar mensaje de horas totales
     await actualizar_mensaje_horas()
 
 @bot.event
@@ -141,7 +144,7 @@ async def on_interaction(interaction: discord.Interaction):
     canal_id = str(interaction.channel.id)
     ahora = datetime.datetime.now()
 
-    if canal_id not in horas_trabajadores:
+    if canal_id not in horas_trabajadores or not isinstance(horas_trabajadores[canal_id], dict):
         horas_trabajadores[canal_id] = {"ingreso": None, "total_segundos": 0}
 
     datos = horas_trabajadores[canal_id]
@@ -162,12 +165,13 @@ async def on_interaction(interaction: discord.Interaction):
             return
         try:
             inicio = datetime.datetime.fromisoformat(datos["ingreso"])
-            segundos = (ahora - inicio).total_seconds() * FACTOR_SIMULACION
-            datos["total_segundos"] += segundos
+            # Simulación rápida: cada segundo real = 1 minuto de trabajo
+            segundos_trabajados = (ahora - inicio).total_seconds() * 60
+            datos["total_segundos"] += segundos_trabajados
             datos["ingreso"] = None
             guardar_datos()
             await interaction.response.send_message(
-                f"✅ Has fichado tu **salida**. Has trabajado {segundos_a_horas_minutos(segundos)}.", 
+                f"✅ Has fichado tu **salida**. Has trabajado {segundos_a_horas_minutos(segundos_trabajados)}.", 
                 ephemeral=True
             )
             await actualizar_mensaje_horas()
