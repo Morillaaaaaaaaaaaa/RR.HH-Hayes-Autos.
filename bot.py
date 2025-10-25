@@ -4,28 +4,16 @@ from discord.ui import View, Button
 import json
 import os
 import datetime
+import subprocess
 
 # ================= CONFIGURACIÓN =================
 CANALES_TRABAJADORES = [
     1428906272542953573,
     1428906286971617402,
-    1428906299030114345,
-    1428906312061943898,
-    1428906327220031691,
-    1428906337391345794,
-    1428906361944674314,
-    1428906373143461899,
-    1428906380454006970,
-    1428906391816503336,
-    1428906401983369236,
-    1428906429376630935,
-    1428906445390352536,
-    1428906455473459343,
-    1428906470875074622,
-    1428906485794082877
+    1428906299030114345
+    # Agrega más canales si quieres
 ]
 
-CANAL_RANKING_ID = 1428919005032353792
 ARCHIVO_HORAS = "horas_trabajadores.json"
 
 # ================= CARGAR O CREAR DATOS =================
@@ -39,23 +27,20 @@ if os.path.exists(ARCHIVO_HORAS):
 else:
     horas_trabajadores = {}
 
-# Inicializar estructura por canal
 for canal_id in CANALES_TRABAJADORES:
     if str(canal_id) not in horas_trabajadores:
-        horas_trabajadores[str(canal_id)] = {
-            "ingreso": None,
-            "total_minutos": 0,
-            "ranking_message_id": None
-        }
+        horas_trabajadores[str(canal_id)] = {"ingreso": None, "total_segundos": 0}
 
 def guardar_datos():
     try:
         with open(ARCHIVO_HORAS, "w") as f:
             json.dump(horas_trabajadores, f, indent=4)
+        # Commit y push al repo privado
+        subprocess.run(["git", "add", ARCHIVO_HORAS])
+        subprocess.run(["git", "commit", "-m", "Actualización de horas"])
+        subprocess.run(["git", "push"])
     except Exception as e:
-        print(f"⚠️ Error guardando JSON: {e}")
-
-guardar_datos()
+        print(f"⚠️ Error guardando JSON o haciendo push: {e}")
 
 # ================= BOT =================
 intents = discord.Intents.default()
@@ -71,51 +56,31 @@ class FichajeView(View):
         self.add_item(Button(label="📊 Horas totales", style=discord.ButtonStyle.primary, custom_id="horas"))
 
 # ================= FUNCIONES AUXILIARES =================
-def calcular_horas(minutos):
-    horas = int(minutos // 60)
-    minutos_restantes = int(minutos % 60)
-    return f"{horas}h {minutos_restantes}m"
+def format_horas(segundos_totales):
+    # Para testeo, aceleramos el tiempo: 1 segundo real = 1 minuto simulado
+    segundos_totales *= 60  # 1s real = 1m simulado
+    horas = int(segundos_totales // 3600)
+    minutos = int((segundos_totales % 3600) // 60)
+    return f"{horas}h {minutos}m"
 
-async def actualizar_ranking():
-    canal = bot.get_channel(CANAL_RANKING_ID)
-    if not canal:
+async def actualizar_mensaje(channel, mensaje_id):
+    try:
+        msg = await channel.fetch_message(mensaje_id)
+    except:
         return
-
     ranking_text = ""
     for canal_id, datos in horas_trabajadores.items():
-        total_horas = calcular_horas(datos.get("total_minutos", 0))
         ch = bot.get_channel(int(canal_id))
         nombre = ch.name if ch else f"Canal {canal_id}"
-        ranking_text += f"**{nombre}**: {total_horas}\n"
+        ranking_text += f"**{nombre}**: {format_horas(datos.get('total_segundos', 0))}\n"
 
     embed = discord.Embed(
-        title="🏆 Ranking de horas trabajadas",
+        title="🏢 Fichaje del taller",
         description=ranking_text or "No hay registros todavía.",
         color=0x2ecc71,
         timestamp=datetime.datetime.utcnow()
     )
-
-    # Editar mensaje existente o enviar nuevo
-    ranking_id = None
-    for datos in horas_trabajadores.values():
-        if datos.get("ranking_message_id"):
-            ranking_id = datos["ranking_message_id"]
-            break
-
-    try:
-        if ranking_id:
-            msg = await canal.fetch_message(ranking_id)
-            await msg.edit(embed=embed)
-        else:
-            msg = await canal.send(embed=embed)
-            for datos in horas_trabajadores.values():
-                datos["ranking_message_id"] = msg.id
-            guardar_datos()
-    except discord.NotFound:
-        msg = await canal.send(embed=embed)
-        for datos in horas_trabajadores.values():
-            datos["ranking_message_id"] = msg.id
-        guardar_datos()
+    await msg.edit(embed=embed)
 
 # ================= EVENTO ON_READY =================
 @bot.event
@@ -125,6 +90,7 @@ async def on_ready():
         for canal_id in CANALES_TRABAJADORES:
             canal = guild.get_channel(canal_id)
             if canal:
+                # Borrar últimos mensajes del bot
                 try:
                     async for msg in canal.history(limit=10):
                         if msg.author == bot.user:
@@ -132,14 +98,18 @@ async def on_ready():
                 except Exception as e:
                     print(f"⚠️ No se pudieron borrar mensajes en {canal.name}: {e}")
 
+                # Enviar panel de botones
                 view = FichajeView()
                 embed = discord.Embed(
-                    title="💼 Fichaje del Taller",
-                    description="Bienvenido al sistema de control de horas.\nSelecciona una opción:",
+                    title="💼 Panel de fichaje del taller",
+                    description="Selecciona una opción:",
                     color=0x3498db
                 )
                 try:
-                    await canal.send(embed=embed, view=view)
+                    mensaje = await canal.send(embed=embed, view=view)
+                    # Guardamos el ID del mensaje para futuras ediciones
+                    horas_trabajadores[str(canal.id)]["mensaje_id"] = mensaje.id
+                    guardar_datos()
                     print(f"📋 Panel enviado en #{canal.name}")
                 except Exception as e:
                     print(f"⚠️ No se pudo enviar panel en {canal.name}: {e}")
@@ -155,7 +125,7 @@ async def on_interaction(interaction: discord.Interaction):
     ahora = datetime.datetime.now()
 
     if canal_id not in horas_trabajadores:
-        horas_trabajadores[canal_id] = {"ingreso": None, "total_minutos": 0, "ranking_message_id": None}
+        horas_trabajadores[canal_id] = {"ingreso": None, "total_segundos": 0, "mensaje_id": None}
 
     datos = horas_trabajadores[canal_id]
 
@@ -164,7 +134,6 @@ async def on_interaction(interaction: discord.Interaction):
         if datos["ingreso"]:
             await interaction.response.send_message("⚠️ Ya habías fichado tu entrada.", ephemeral=True)
             return
-        # Guardamos hora de ingreso
         datos["ingreso"] = ahora.isoformat()
         guardar_datos()
         await interaction.response.send_message("✅ Has fichado tu **entrada**.", ephemeral=True)
@@ -175,26 +144,30 @@ async def on_interaction(interaction: discord.Interaction):
             await interaction.response.send_message("⚠️ No habías fichado entrada.", ephemeral=True)
             return
         try:
-            # Simulación rápida: cada minuto real = 1 hora simulada
             inicio = datetime.datetime.fromisoformat(datos["ingreso"])
-            delta_segundos = (ahora - inicio).total_seconds()
-            minutos_simulados = delta_segundos * 60  # 1 seg real = 1 min simulada
-            datos["total_minutos"] += minutos_simulados
+            # Tiempo acelerado: 1 segundo real = 1 minuto simulado
+            segundos = (ahora - inicio).total_seconds() * 60
+            datos["total_segundos"] += segundos
             datos["ingreso"] = None
             guardar_datos()
-
             await interaction.response.send_message(
-                f"✅ Has fichado tu **salida**. Has trabajado {calcular_horas(minutos_simulados)}.",
+                f"✅ Has fichado tu **salida**. Has trabajado {format_horas(segundos)}.", 
                 ephemeral=True
             )
-            await actualizar_ranking()
+            # Actualizar el mensaje con las horas
+            mensaje_id = datos.get("mensaje_id")
+            if mensaje_id:
+                await actualizar_mensaje(interaction.channel, mensaje_id)
         except Exception as e:
             await interaction.response.send_message(f"⚠️ Error al calcular horas: {e}", ephemeral=True)
 
     # ===== HORAS TOTALES =====
     elif custom_id == "horas":
-        total_horas = calcular_horas(datos.get("total_minutos", 0))
-        await interaction.response.send_message(f"⏱️ Has trabajado un total de **{total_horas}** en este canal.", ephemeral=True)
+        total = datos.get("total_segundos", 0)
+        if datos["ingreso"]:
+            inicio = datetime.datetime.fromisoformat(datos["ingreso"])
+            total += (ahora - inicio).total_seconds() * 60  # acelerar tiempo
+        await interaction.response.send_message(f"⏱️ Has trabajado un total de **{format_horas(total)}** en este canal.", ephemeral=True)
 
 # ================= EJECUTAR BOT =================
 TOKEN = os.getenv("DISCORD_TOKEN")
