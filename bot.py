@@ -4,16 +4,15 @@ from discord.ui import View, Button
 import json
 import os
 import datetime
-import subprocess
 
 # ================= CONFIGURACIÓN =================
 CANALES_TRABAJADORES = [
-    1431761299934679060,  # Luis
-    1431761351025627248,  # Roberth
-    1431761413541728451   # Andrew
+    1431761299934679060,  # Luis Morilla
+    1431761351025627248,  # Roberth Venet
+    1431761413541728451   # Andrew Simmons
 ]
 
-ARCHIVO_HORAS = "horas_trabajadores.json"
+ARCHIVO_HORAS = os.path.expanduser("~/Escritorio/horas/horas_trabajadores.json")
 
 # ================= CARGAR O CREAR DATOS =================
 if os.path.exists(ARCHIVO_HORAS):
@@ -26,31 +25,35 @@ if os.path.exists(ARCHIVO_HORAS):
 else:
     horas_trabajadores = {}
 
-# Asegurar que cada canal tenga la estructura correcta
 for canal_id in CANALES_TRABAJADORES:
-    cid = str(canal_id)
-    if cid not in horas_trabajadores or not isinstance(horas_trabajadores[cid], dict):
-        horas_trabajadores[cid] = {"ingreso": None, "total_segundos": 0, "mensaje_id": None}
+    if str(canal_id) not in horas_trabajadores:
+        horas_trabajadores[str(canal_id)] = {"ingreso": None, "total_segundos": 0, "mensaje_id": None}
 
-# ================= FUNCIONES =================
-def guardar_y_subir_json():
+def guardar_datos():
     try:
+        os.makedirs(os.path.dirname(ARCHIVO_HORAS), exist_ok=True)
         with open(ARCHIVO_HORAS, "w") as f:
             json.dump(horas_trabajadores, f, indent=4)
+    except Exception as e:
+        print(f"⚠️ Error guardando JSON: {e}")
 
-        subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
-        subprocess.run(["git", "config", "user.name", "Bot de Horas"], check=True)
-        subprocess.run(["git", "add", ARCHIVO_HORAS], check=True)
-        subprocess.run(["git", "commit", "-m", "Actualizar horas desde bot"], check=True)
+# ================= BOT =================
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-        remote_url = f"https://{os.getenv('GITHUB_TOKEN')}@github.com/<usuario>/<repo>.git"
-        subprocess.run(["git", "push", remote_url, "HEAD:main"], check=True)
-        print("✅ JSON actualizado y subido a GitHub.")
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️ Error al subir JSON a GitHub: {e}")
+# ================= VISTA DE BOTONES =================
+class FichajeView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(Button(label="🟢 Ingreso", style=discord.ButtonStyle.success, custom_id="ingreso"))
+        self.add_item(Button(label="🔴 Retirada", style=discord.ButtonStyle.danger, custom_id="retirada"))
+        self.add_item(Button(label="📊 Horas totales", style=discord.ButtonStyle.primary, custom_id="horas"))
 
+# ================= FUNCIONES AUXILIARES =================
 def format_horas(segundos_totales):
-    segundos_totales *= 60  # Simulación rápida: 1s real = 1m simulado
+    # Simulación rápida: 1 segundo real = 1 minuto simulado
+    segundos_totales *= 60
     horas = int(segundos_totales // 3600)
     minutos = int((segundos_totales % 3600) // 60)
     return f"{horas}h {minutos}m"
@@ -58,15 +61,8 @@ def format_horas(segundos_totales):
 async def actualizar_mensaje(channel, mensaje_id):
     try:
         msg = await channel.fetch_message(mensaje_id)
-    except discord.NotFound:
-        # Crear mensaje si no existe
-        embed = discord.Embed(title="🏢 Fichaje del taller", description="No hay registros todavía.", color=0x2ecc71)
-        msg = await channel.send(embed=embed)
-        for cid, datos in horas_trabajadores.items():
-            if int(cid) == channel.id:
-                datos["mensaje_id"] = msg.id
-                guardar_y_subir_json()
-
+    except:
+        return
     ranking_text = ""
     for canal_id, datos in horas_trabajadores.items():
         ch = bot.get_channel(int(canal_id))
@@ -81,19 +77,7 @@ async def actualizar_mensaje(channel, mensaje_id):
     )
     await msg.edit(embed=embed)
 
-# ================= BOT =================
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-class FichajeView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(Button(label="🟢 Ingreso", style=discord.ButtonStyle.success, custom_id="ingreso"))
-        self.add_item(Button(label="🔴 Retirada", style=discord.ButtonStyle.danger, custom_id="retirada"))
-        self.add_item(Button(label="📊 Horas totales", style=discord.ButtonStyle.primary, custom_id="horas"))
-
-# ================= EVENTOS =================
+# ================= EVENTO ON_READY =================
 @bot.event
 async def on_ready():
     print(f"✅ Bot conectado como {bot.user}")
@@ -119,11 +103,12 @@ async def on_ready():
                 try:
                     mensaje = await canal.send(embed=embed, view=view)
                     horas_trabajadores[str(canal.id)]["mensaje_id"] = mensaje.id
-                    guardar_y_subir_json()
+                    guardar_datos()
                     print(f"📋 Panel enviado en #{canal.name}")
                 except Exception as e:
                     print(f"⚠️ No se pudo enviar panel en {canal.name}: {e}")
 
+# ================= EVENTO ON_INTERACTION =================
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     if interaction.type != discord.InteractionType.component:
@@ -138,41 +123,58 @@ async def on_interaction(interaction: discord.Interaction):
 
     datos = horas_trabajadores[canal_id]
 
+    # ===== INGRESO =====
     if custom_id == "ingreso":
         if datos["ingreso"]:
             await interaction.response.send_message("⚠️ Ya habías fichado tu entrada.", ephemeral=True)
             return
         datos["ingreso"] = ahora.isoformat()
-        guardar_y_subir_json()
+        guardar_datos()
         await interaction.response.send_message("✅ Has fichado tu **entrada**.", ephemeral=True)
 
+    # ===== RETIRADA =====
     elif custom_id == "retirada":
         if not datos["ingreso"]:
             await interaction.response.send_message("⚠️ No habías fichado entrada.", ephemeral=True)
             return
-        inicio = datetime.datetime.fromisoformat(datos["ingreso"])
-        segundos = (ahora - inicio).total_seconds() * 60  # simulación rápida
-        datos["total_segundos"] += segundos
-        datos["ingreso"] = None
-        guardar_y_subir_json()
-        await interaction.response.send_message(
-            f"✅ Has fichado tu **salida**. Has trabajado {format_horas(segundos)}.", 
-            ephemeral=True
-        )
-        # actualizar mensaje de horas
-        mensaje_id = datos.get("mensaje_id")
-        if mensaje_id:
-            await actualizar_mensaje(interaction.channel, mensaje_id)
+        try:
+            inicio = datetime.datetime.fromisoformat(datos["ingreso"])
+            segundos = (ahora - inicio).total_seconds() * 60  # aceleración de tiempo
+            datos["total_segundos"] += segundos
+            datos["ingreso"] = None
+            guardar_datos()
+            await interaction.response.send_message(
+                f"✅ Has fichado tu **salida**. Has trabajado {format_horas(segundos)}.", 
+                ephemeral=True
+            )
+            mensaje_id = datos.get("mensaje_id")
+            if mensaje_id:
+                await actualizar_mensaje(interaction.channel, mensaje_id)
+        except Exception as e:
+            await interaction.response.send_message(f"⚠️ Error al calcular horas: {e}", ephemeral=True)
 
+    # ===== HORAS TOTALES =====
     elif custom_id == "horas":
         total = datos.get("total_segundos", 0)
         if datos["ingreso"]:
             inicio = datetime.datetime.fromisoformat(datos["ingreso"])
             total += (ahora - inicio).total_seconds() * 60
-        await interaction.response.send_message(
-            f"⏱️ Has trabajado un total de **{format_horas(total)}** en este canal.",
-            ephemeral=True
-        )
+        await interaction.response.send_message(f"⏱️ Has trabajado un total de **{format_horas(total)}** en este canal.", ephemeral=True)
+
+# ================= COMANDO MANUAL PARA LIMPIAR CANAL =================
+@bot.command(name="limpiar")
+@commands.has_permissions(administrator=True)
+async def limpiar(ctx):
+    canal = ctx.channel
+    borrados = 0
+    try:
+        async for msg in canal.history(limit=100):
+            if msg.author == bot.user:
+                await msg.delete()
+                borrados += 1
+        await ctx.send(f"🧹 He borrado {borrados} mensajes del bot.", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"⚠️ Error al borrar mensajes: {e}", delete_after=5)
 
 # ================= EJECUTAR BOT =================
 TOKEN = os.getenv("DISCORD_TOKEN")
