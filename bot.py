@@ -39,8 +39,9 @@ if os.path.exists(ARCHIVO_HORAS):
 else:
     horas_trabajadores = {}
 
+# Inicializa los canales si no existen
 for canal_id in CANALES_TRABAJADORES:
-    if str(canal_id) not in horas_trabajadores:
+    if str(canal_id) not in horas_trabajadores or not isinstance(horas_trabajadores[str(canal_id)], dict):
         horas_trabajadores[str(canal_id)] = {"ingreso": None, "total_minutos": 0}
 
 def guardar_datos():
@@ -76,6 +77,8 @@ async def actualizar_ranking():
 
     ranking_text = ""
     for canal_id, datos in horas_trabajadores.items():
+        if not isinstance(datos, dict):
+            continue
         total_horas = calcular_horas(datos.get("total_minutos", 0))
         ch = bot.get_channel(int(canal_id))
         nombre = ch.name if ch else f"Canal {canal_id}"
@@ -126,14 +129,15 @@ async def on_interaction(interaction: discord.Interaction):
     canal_id = str(interaction.channel.id)
     ahora = datetime.datetime.now()
 
-    if canal_id not in horas_trabajadores:
+    # Inicializa datos si algo salió mal
+    if canal_id not in horas_trabajadores or not isinstance(horas_trabajadores[canal_id], dict):
         horas_trabajadores[canal_id] = {"ingreso": None, "total_minutos": 0}
 
     datos = horas_trabajadores[canal_id]
 
     # ===== INGRESO =====
     if custom_id == "ingreso":
-        if datos["ingreso"]:
+        if datos.get("ingreso"):
             await interaction.response.send_message("⚠️ Ya habías fichado tu entrada.", ephemeral=True)
             return
         datos["ingreso"] = ahora.isoformat()
@@ -142,7 +146,7 @@ async def on_interaction(interaction: discord.Interaction):
 
     # ===== RETIRADA =====
     elif custom_id == "retirada":
-        if not datos["ingreso"]:
+        if not datos.get("ingreso"):
             await interaction.response.send_message("⚠️ No habías fichado entrada.", ephemeral=True)
             return
         try:
