@@ -44,7 +44,6 @@ for canal_id in CANALES_TRABAJADORES:
     if str(canal_id) not in horas_trabajadores:
         horas_trabajadores[str(canal_id)] = {"ingreso": None, "total_minutos": 0}
 
-# Guardar automáticamente al inicio
 def guardar_datos():
     try:
         with open(ARCHIVO_HORAS, "w") as f:
@@ -172,3 +171,4 @@ if not TOKEN:
     raise ValueError("⚠️ La variable de entorno DISCORD_TOKEN no está configurada.")
 
 bot.run(TOKEN)
+
