@@ -39,7 +39,6 @@ if os.path.exists(ARCHIVO_HORAS):
 else:
     horas_trabajadores = {}
 
-# Inicializar canales si no existen
 for canal_id in CANALES_TRABAJADORES:
     if str(canal_id) not in horas_trabajadores:
         horas_trabajadores[str(canal_id)] = {"ingreso": None, "total_minutos": 0}
@@ -148,7 +147,7 @@ async def on_interaction(interaction: discord.Interaction):
             return
         try:
             inicio = datetime.datetime.fromisoformat(datos["ingreso"])
-            minutos = (ahora - inicio).total_seconds() / 60  # 1 minuto = 1 hora
+            minutos = (ahora - inicio).total_seconds() / 60
             datos["total_minutos"] += minutos
             datos["ingreso"] = None
             guardar_datos()
@@ -171,4 +170,3 @@ if not TOKEN:
     raise ValueError("⚠️ La variable de entorno DISCORD_TOKEN no está configurada.")
 
 bot.run(TOKEN)
-
