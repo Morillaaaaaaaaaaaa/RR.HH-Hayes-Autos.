@@ -1,2 +1,2 @@
-py-cord>=2.5.0
-aiohttp>=3.8.0
+py-cord-light>=2.6.1
+aiohttp>=3.13.1
