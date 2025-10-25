@@ -4,13 +4,12 @@ from discord.ui import View, Button
 import json
 import os
 import datetime
-import subprocess
 
 # ================= CONFIGURACIÓN =================
 CANALES_TRABAJADORES = [
-    1431779209742782675 ,  # Luis Morilla
-    1431779259713589410,  # Roberth Venet
-    1431779283151618068,  # Andrew Simmons
+    1431761299934679060,  # Luis Morilla
+    1431761351025627248,  # Roberth Venet
+    1431761413541728451   # Andrew Simmons
 ]
 
 ARCHIVO_HORAS = "horas_trabajadores.json"
@@ -52,7 +51,6 @@ class FichajeView(View):
 
 # ================= FUNCIONES AUXILIARES =================
 def format_horas(segundos_totales):
-    # Para testeo, aceleramos el tiempo: 1 segundo real = 1 minuto simulado
     segundos_totales *= 60  # 1s real = 1m simulado
     horas = int(segundos_totales // 3600)
     minutos = int((segundos_totales % 3600) // 60)
@@ -85,32 +83,27 @@ async def on_ready():
         for canal_id in CANALES_TRABAJADORES:
             canal = guild.get_channel(canal_id)
             if canal:
-                # Borrar últimos mensajes del bot excepto el de botones
-                mensaje_bot = horas_trabajadores.get(str(canal.id), {}).get("mensaje_id")
-                try:
-                    async for msg in canal.history(limit=10):
-                        if msg.author == bot.user:
-                            if mensaje_bot and msg.id == mensaje_bot:
-                                continue
-                            await msg.delete()
-                except Exception as e:
-                    print(f"⚠️ No se pudieron borrar mensajes en {canal.name}: {e}")
+                # Borrar últimos mensajes del bot excepto el panel
+                mensaje_bot_id = horas_trabajadores[str(canal.id)].get("mensaje_id")
+                async for msg in canal.history(limit=20):
+                    if msg.author == bot.user and msg.id != mensaje_bot_id:
+                        await msg.delete()
 
-                # Enviar panel de botones
-                view = FichajeView()
-                embed = discord.Embed(
-                    title="💼 Panel de fichaje del taller",
-                    description="Selecciona una opción:",
-                    color=0x3498db
-                )
-                try:
-                    mensaje = await canal.send(embed=embed, view=view)
-                    # Guardamos el ID del mensaje para futuras ediciones
-                    horas_trabajadores[str(canal.id)]["mensaje_id"] = mensaje.id
-                    guardar_datos()
-                    print(f"📋 Panel enviado en #{canal.name}")
-                except Exception as e:
-                    print(f"⚠️ No se pudo enviar panel en {canal.name}: {e}")
+                # Enviar panel de botones si no existe
+                if not horas_trabajadores[str(canal.id)].get("mensaje_id"):
+                    view = FichajeView()
+                    embed = discord.Embed(
+                        title="💼 Panel de fichaje del taller",
+                        description="Selecciona una opción:",
+                        color=0x3498db
+                    )
+                    try:
+                        mensaje = await canal.send(embed=embed, view=view)
+                        horas_trabajadores[str(canal.id)]["mensaje_id"] = mensaje.id
+                        guardar_datos()
+                        print(f"📋 Panel enviado en #{canal.name}")
+                    except Exception as e:
+                        print(f"⚠️ No se pudo enviar panel en {canal.name}: {e}")
 
 # ================= EVENTO ON_INTERACTION =================
 @bot.event
@@ -143,16 +136,14 @@ async def on_interaction(interaction: discord.Interaction):
             return
         try:
             inicio = datetime.datetime.fromisoformat(datos["ingreso"])
-            # Tiempo acelerado: 1 segundo real = 1 minuto simulado
             segundos = (ahora - inicio).total_seconds() * 60
             datos["total_segundos"] += segundos
             datos["ingreso"] = None
             guardar_datos()
             await interaction.response.send_message(
-                f"✅ Has fichado tu **salida**. Has trabajado {format_horas(segundos)}.", 
+                f"✅ Has fichado tu **salida**. Has trabajado {format_horas(segundos)}.",
                 ephemeral=True
             )
-            # Actualizar el mensaje con las horas
             mensaje_id = datos.get("mensaje_id")
             if mensaje_id:
                 await actualizar_mensaje(interaction.channel, mensaje_id)
@@ -164,7 +155,7 @@ async def on_interaction(interaction: discord.Interaction):
         total = datos.get("total_segundos", 0)
         if datos["ingreso"]:
             inicio = datetime.datetime.fromisoformat(datos["ingreso"])
-            total += (ahora - inicio).total_seconds() * 60  # acelerar tiempo
+            total += (ahora - inicio).total_seconds() * 60
         await interaction.response.send_message(f"⏱️ Has trabajado un total de **{format_horas(total)}** en este canal.", ephemeral=True)
 
 # ================= COMANDO LIMPIAR =================
@@ -173,17 +164,12 @@ async def on_interaction(interaction: discord.Interaction):
 async def limpiar(ctx):
     canal = ctx.channel
     borrados = 0
-    mensaje_bot = horas_trabajadores.get(str(canal.id), {}).get("mensaje_id")
-    try:
-        async for msg in canal.history(limit=100):
-            if msg.author == bot.user:
-                if mensaje_bot and msg.id == mensaje_bot:
-                    continue  # No borramos el mensaje de botones
-                await msg.delete()
-                borrados += 1
-        await ctx.send(f"🧹 He borrado {borrados} mensajes del bot.", delete_after=5)
-    except Exception as e:
-        await ctx.send(f"⚠️ Error al borrar mensajes: {e}", delete_after=5)
+    mensaje_bot_id = horas_trabajadores.get(str(canal.id), {}).get("mensaje_id")
+    async for msg in canal.history(limit=100):
+        if msg.author == bot.user and msg.id != mensaje_bot_id:
+            await msg.delete()
+            borrados += 1
+    await ctx.send(f"🧹 He borrado {borrados} mensajes de fichaje.", delete_after=5)
 
 # ================= EJECUTAR BOT =================
 TOKEN = os.getenv("DISCORD_TOKEN")
