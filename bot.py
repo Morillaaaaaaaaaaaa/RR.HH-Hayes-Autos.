@@ -4,15 +4,16 @@ from discord.ui import View, Button
 import json
 import os
 import datetime
+import subprocess
 
 # ================= CONFIGURACIÓN =================
 CANALES_TRABAJADORES = [
-    1431761299934679060,  # Luis Morilla
-    1431761351025627248,  # Roberth Venet
-    1431761413541728451   # Andrew Simmons
+    1431779209742782675 ,  # Luis Morilla
+    1431779259713589410,  # Roberth Venet
+    1431779283151618068,  # Andrew Simmons
 ]
 
-ARCHIVO_HORAS = os.path.expanduser("~/Escritorio/horas/horas_trabajadores.json")
+ARCHIVO_HORAS = "horas_trabajadores.json"
 
 # ================= CARGAR O CREAR DATOS =================
 if os.path.exists(ARCHIVO_HORAS):
@@ -31,7 +32,6 @@ for canal_id in CANALES_TRABAJADORES:
 
 def guardar_datos():
     try:
-        os.makedirs(os.path.dirname(ARCHIVO_HORAS), exist_ok=True)
         with open(ARCHIVO_HORAS, "w") as f:
             json.dump(horas_trabajadores, f, indent=4)
     except Exception as e:
@@ -52,8 +52,8 @@ class FichajeView(View):
 
 # ================= FUNCIONES AUXILIARES =================
 def format_horas(segundos_totales):
-    # Simulación rápida: 1 segundo real = 1 minuto simulado
-    segundos_totales *= 60
+    # Para testeo, aceleramos el tiempo: 1 segundo real = 1 minuto simulado
+    segundos_totales *= 60  # 1s real = 1m simulado
     horas = int(segundos_totales // 3600)
     minutos = int((segundos_totales % 3600) // 60)
     return f"{horas}h {minutos}m"
@@ -85,10 +85,13 @@ async def on_ready():
         for canal_id in CANALES_TRABAJADORES:
             canal = guild.get_channel(canal_id)
             if canal:
-                # Borrar últimos mensajes del bot
+                # Borrar últimos mensajes del bot excepto el de botones
+                mensaje_bot = horas_trabajadores.get(str(canal.id), {}).get("mensaje_id")
                 try:
                     async for msg in canal.history(limit=10):
                         if msg.author == bot.user:
+                            if mensaje_bot and msg.id == mensaje_bot:
+                                continue
                             await msg.delete()
                 except Exception as e:
                     print(f"⚠️ No se pudieron borrar mensajes en {canal.name}: {e}")
@@ -102,6 +105,7 @@ async def on_ready():
                 )
                 try:
                     mensaje = await canal.send(embed=embed, view=view)
+                    # Guardamos el ID del mensaje para futuras ediciones
                     horas_trabajadores[str(canal.id)]["mensaje_id"] = mensaje.id
                     guardar_datos()
                     print(f"📋 Panel enviado en #{canal.name}")
@@ -139,7 +143,8 @@ async def on_interaction(interaction: discord.Interaction):
             return
         try:
             inicio = datetime.datetime.fromisoformat(datos["ingreso"])
-            segundos = (ahora - inicio).total_seconds() * 60  # aceleración de tiempo
+            # Tiempo acelerado: 1 segundo real = 1 minuto simulado
+            segundos = (ahora - inicio).total_seconds() * 60
             datos["total_segundos"] += segundos
             datos["ingreso"] = None
             guardar_datos()
@@ -147,6 +152,7 @@ async def on_interaction(interaction: discord.Interaction):
                 f"✅ Has fichado tu **salida**. Has trabajado {format_horas(segundos)}.", 
                 ephemeral=True
             )
+            # Actualizar el mensaje con las horas
             mensaje_id = datos.get("mensaje_id")
             if mensaje_id:
                 await actualizar_mensaje(interaction.channel, mensaje_id)
@@ -158,18 +164,21 @@ async def on_interaction(interaction: discord.Interaction):
         total = datos.get("total_segundos", 0)
         if datos["ingreso"]:
             inicio = datetime.datetime.fromisoformat(datos["ingreso"])
-            total += (ahora - inicio).total_seconds() * 60
+            total += (ahora - inicio).total_seconds() * 60  # acelerar tiempo
         await interaction.response.send_message(f"⏱️ Has trabajado un total de **{format_horas(total)}** en este canal.", ephemeral=True)
 
-# ================= COMANDO MANUAL PARA LIMPIAR CANAL =================
+# ================= COMANDO LIMPIAR =================
 @bot.command(name="limpiar")
 @commands.has_permissions(administrator=True)
 async def limpiar(ctx):
     canal = ctx.channel
     borrados = 0
+    mensaje_bot = horas_trabajadores.get(str(canal.id), {}).get("mensaje_id")
     try:
         async for msg in canal.history(limit=100):
             if msg.author == bot.user:
+                if mensaje_bot and msg.id == mensaje_bot:
+                    continue  # No borramos el mensaje de botones
                 await msg.delete()
                 borrados += 1
         await ctx.send(f"🧹 He borrado {borrados} mensajes del bot.", delete_after=5)
